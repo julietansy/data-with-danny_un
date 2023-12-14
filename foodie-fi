@@ -1,0 +1,170 @@
+SET search_path = foodie_fi;
+
+/* --------------------
+   CREATE TEMP TABLE
+   --------------------*/
+
+CREATE TEMP TABLE customer_plans AS
+
+SELECT
+    s.customer_id,
+    s.plan_id,
+    p.plan_name,
+    p.price,
+    s.start_date,
+    CASE
+        WHEN LEAD(s.start_date) OVER (PARTITION BY s.customer_id ORDER BY s.start_date) IS NOT NULL THEN 
+            LEAD(s.start_date) OVER (PARTITION BY s.customer_id ORDER BY s.start_date) - 1
+        ELSE
+            NULL
+    END AS end_date
+    CASE
+        WHEN LEAD(s.start_date) OVER (PARTITION BY s.customer_id ORDER BY s.start_date) IS NOT NULL THEN 
+            LEAD(s.start_date) OVER (PARTITION BY s.customer_id ORDER BY s.start_date) - s.start_date - 1
+        ELSE
+            NULL
+    END AS duration_in_days
+FROM subscriptions s
+LEFT JOIN plans p
+  ON s.plan_id = p.plan_id;
+
+
+/* --------------------
+   A. Customer Journey
+   --------------------*/
+
+
+-- Based off the 8 sample customers provided in the sample from the subscriptions table, write a brief description about each customer’s onboarding journey.
+
+
+SELECT *
+FROM customer_plans
+WHERE customer_id IN (1,2,11,13,15,16,18,19);
+
+
+/* --------------------
+   B. Data Analysis Questions
+   --------------------*/
+
+-- 1.  How many customers has Foodie-Fi ever had?
+
+SELECT 
+	COUNT(DISTINCT customer_id) AS total_cust
+FROM customer_plans;
+
+-- 2.  What is the monthly distribution of trial plan start_date values for our dataset - use the start of the month as the group by value
+
+SELECT 
+	EXTRACT(MONTH FROM start_date) as month, 
+    TO_CHAR(start_date, 'Month') as month_name,
+	COUNT(plan_name) as trial_count
+FROM customer_plans
+WHERE plan_name = 'trial'
+GROUP BY month, month_name;
+
+-- 3.  What plan start_date values occur after the year 2020 for our dataset? Show the breakdown by count of events for each plan_name
+
+SELECT a.plan_name, b.cust_count
+FROM customer_plans a
+LEFT JOIN (SELECT 
+               plan_name,
+               COUNT(customer_id) AS cust_count
+            FROM customer_plans
+            WHERE EXTRACT(YEAR FROM start_date) > 2020
+            GROUP BY plan_name, plan_id
+            ORDER BY plan_id) b
+ON a.plan_name = b.plan_name
+GROUP BY a.plan_id, a.plan_name, b.cust_count
+ORDER BY a.plan_id;
+
+-- 4.  What is the customer count and percentage of customers who have churned rounded to 1 decimal place?
+
+WITH churn AS (
+    SELECT 
+        COUNT(CASE WHEN plan_name = 'churn' THEN customer_id END) AS total_churn,
+        COUNT(DISTINCT customer_id) AS total_cust
+    FROM customer_plans
+)
+
+SELECT 
+  total_churn AS churn_count,
+  ROUND((ROUND((total_churn * 100.0),1) / total_cust),1) AS churn_percentage
+FROM churn;
+
+-- 5.  How many customers have churned straight after their initial free trial - what percentage is this rounded to the nearest whole number?
+
+SELECT 
+	COUNT(DISTINCT b.customer_id) as churn_trial_count,
+    ROUND((ROUND((COUNT(DISTINCT b.customer_id) * 100),0) / COUNT(DISTINCT a.customer_id)),0) AS churn_trial_percent
+FROM customer_plans a
+LEFT JOIN (SELECT 
+           	customer_id
+           FROM customer_plans
+           WHERE customer_id NOT IN (SELECT customer_id FROM customer_plans WHERE plan_name = 'trial'
+                                     INTERSECT
+                                     SELECT customer_id FROM customer_plans WHERE plan_name = 'basic monthly'
+                                    										OR plan_name = 'pro monthly'
+                                    										OR plan_name = 'pro annual')) b
+ON a.customer_id = b.customer_id;
+
+-- 6.  What is the number and percentage of customer plans after their initial free trial?
+
+SELECT 
+	COUNT(DISTINCT b.customer_id) as upgrade_count,
+    ROUND((ROUND((COUNT(DISTINCT b.customer_id) * 100),0) / COUNT(DISTINCT a.customer_id)),0) AS upgrade_percent
+FROM customer_plans a
+LEFT JOIN (SELECT 
+           	customer_id
+           FROM customer_plans
+           WHERE customer_id IN (SELECT customer_id FROM customer_plans WHERE plan_name = 'trial'
+                                 INTERSECT
+                                 SELECT customer_id FROM customer_plans WHERE plan_name = 'basic monthly'
+                                    										OR plan_name = 'pro monthly'
+                                    										OR plan_name = 'pro annual')) b
+ON a.customer_id = b.customer_id;
+
+-- 7.  What is the customer count and percentage breakdown of all 5 plan_name values at 2020-12-31?
+
+WITH as_at_2020 AS (SELECT 
+                      plan_name,
+                      customer_id
+                     FROM customer_plans
+                     WHERE start_date <= '2020-12-31' 
+                      and (end_date >= '2020-12-31' OR end_date IS NULL)) 
+
+
+SELECT 
+	a.plan_name, 
+    COUNT(DISTINCT b.customer_id) AS cust_count,
+    ROUND((ROUND((COUNT(DISTINCT b.customer_id) * 100),1) / (SELECT COUNT(customer_id) FROM as_at_2020)),1) AS cust_percent
+FROM customer_plans a
+LEFT JOIN (SELECT 
+           	plan_name,
+           	customer_id
+           FROM as_at_2020) b
+ON a.plan_name = b.plan_name
+GROUP BY a.plan_name, a.plan_id
+ORDER BY a.plan_id
+
+-- 8.  How many customers have upgraded to an annual plan in 2020?
+
+SELECT 
+	COUNT(DISTINCT customer_id) AS total_cust
+FROM customer_plans
+WHERE plan_name = 'pro annual' 
+  AND EXTRACT(YEAR FROM start_date) = '2020';
+  
+-- 9.  How many days on average does it take for a customer to an annual plan from the day they join Foodie-Fi?
+
+WITH inital AS (SELECT customer_id, MIN(start_date) AS initial_start FROM customer_plans GROUP BY customer_id),
+annual_convert AS (SELECT customer_id, start_date FROM customer_plans GROUP BY customer_id, start_date, plan_name HAVING plan_name = 'pro annual')
+
+SELECT 
+	ROUND(AVG(annual_convert.start_date - inital.initial_start),0) AS avg_days_annual
+FROM inital
+RIGHT JOIN annual_convert
+ON inital.customer_id = annual_convert.customer_id;
+
+-- 10. Can you further breakdown this average value into 30 day periods (i.e. 0-30 days, 31-60 days etc)
+
+-- 11. How many customers downgraded from a pro monthly to a basic monthly plan in 2020?
