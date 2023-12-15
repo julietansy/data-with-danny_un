@@ -1,3 +1,4 @@
+PostgreSQL
 SET search_path = foodie_fi;
 
 /* --------------------
@@ -156,15 +157,91 @@ WHERE plan_name = 'pro annual'
   
 -- 9.  How many days on average does it take for a customer to an annual plan from the day they join Foodie-Fi?
 
-WITH inital AS (SELECT customer_id, MIN(start_date) AS initial_start FROM customer_plans GROUP BY customer_id),
-annual_convert AS (SELECT customer_id, start_date FROM customer_plans GROUP BY customer_id, start_date, plan_name HAVING plan_name = 'pro annual')
+WITH initial AS (
+  SELECT 
+  	customer_id, 
+  	MIN(start_date) AS initial_start 
+  FROM customer_plans 
+  GROUP BY customer_id),
+annual_convert AS (
+  SELECT 
+  	customer_id, 
+  	start_date 
+  FROM customer_plans 
+  GROUP BY 
+  	customer_id, 
+  	start_date, 
+  	plan_name 
+  HAVING plan_name = 'pro annual')
 
 SELECT 
-	ROUND(AVG(annual_convert.start_date - inital.initial_start),0) AS avg_days_annual
-FROM inital
-RIGHT JOIN annual_convert
-ON inital.customer_id = annual_convert.customer_id;
+	ROUND(AVG(ac.start_date - i.initial_start),0) AS avg_days_annual
+FROM initial i
+RIGHT JOIN annual_convert ac
+	ON i.customer_id = ac.customer_id;
+
 
 -- 10. Can you further breakdown this average value into 30 day periods (i.e. 0-30 days, 31-60 days etc)
 
+WITH initial AS (
+  SELECT 
+  	customer_id, 
+  	MIN(start_date) AS initial_start 
+  FROM customer_plans 
+  GROUP BY customer_id),
+annual_convert AS (
+  SELECT 
+  	customer_id, 
+  	start_date 
+  FROM customer_plans 
+  GROUP BY 
+  	customer_id, 
+  	start_date, 
+  	plan_name 
+  HAVING plan_name = 'pro annual')
+  
+  SELECT
+    CASE 
+        WHEN (ac.start_date - i.initial_start) <= 30 THEN '0 - 30 days'
+        WHEN (ac.start_date - i.initial_start) <= 60 THEN '31 - 60 days'
+        WHEN (ac.start_date - i.initial_start) <= 90 THEN '61 - 90 days'
+        WHEN (ac.start_date - i.initial_start) <= 120 THEN '91 - 120 days'
+        WHEN (ac.start_date - i.initial_start) <= 150 THEN '121 - 150 days'
+        WHEN (ac.start_date - i.initial_start) <= 180 THEN '151 - 180 days'
+        WHEN (ac.start_date - i.initial_start) <= 210 THEN '181 - 210 days'
+        WHEN (ac.start_date - i.initial_start) <= 240 THEN '211 - 240 days'
+        WHEN (ac.start_date - i.initial_start) <= 270 THEN '241 - 270 days'
+        WHEN (ac.start_date - i.initial_start) <= 300 THEN '271 - 300 days'
+        WHEN (ac.start_date - i.initial_start) <= 330 THEN '301 - 330 days'
+        WHEN (ac.start_date - i.initial_start) <= 360 THEN '331 - 360 days'
+    END AS period_bucket,
+    COUNT(i.customer_id) AS customer_count
+FROM initial i
+RIGHT JOIN annual_convert ac
+	ON i.customer_id = ac.customer_id
+GROUP BY period_bucket
+ORDER BY MIN(ac.start_date - i.initial_start);
+
 -- 11. How many customers downgraded from a pro monthly to a basic monthly plan in 2020?
+
+WITH pro_monthly AS (
+    SELECT 
+        customer_id, 
+        start_date
+    FROM customer_plans 
+  	WHERE plan_name = 'pro monthly'
+),
+basic_monthly AS (
+    SELECT 
+        customer_id, 
+        start_date
+    FROM customer_plans 
+  	WHERE plan_name = 'basic monthly'
+)
+
+SELECT 
+    bm.customer_id
+FROM basic_monthly bm
+INNER JOIN pro_monthly pm
+	ON bm.customer_id = pm.customer_id
+WHERE bm.start_date > pm.start_date;
